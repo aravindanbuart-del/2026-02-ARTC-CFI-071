@@ -1,0 +1,98 @@
+import pandas as pd
+import os
+import matplotlib.pyplot as plt
+
+# Define file paths
+base_path = "archive (13)"
+output_dir = "iot_results"
+os.makedirs(output_dir, exist_ok=True)
+plots_dir = os.path.join(output_dir, "plots")
+os.makedirs(plots_dir, exist_ok=True)
+
+files = {
+    "data": f"{base_path}/data.csv",
+    "demo1": f"{base_path}/demo1.csv",
+    "moisture_days": f"{base_path}/moisture_days.csv",
+    "moisture_time": f"{base_path}/moisture_time.csv"
+}
+
+def clean_and_save(name, path):
+    if not os.path.exists(path):
+        print(f"Skipping {name}: File not found.")
+        return None
+
+    print(f"Processing {name}...")
+    try:
+        df = pd.read_csv(path)
+        
+        # Specific handling for demo1 timestamps
+        if name == "demo1" and "[" in str(df.iloc[0, 0]):
+            col0 = df.columns[0]
+            # Remove brackets and convert to datetime
+            df[col0] = df[col0].astype(str).str.replace(r"[\[\]]", "", regex=True)
+            df[col0] = pd.to_datetime(df[col0])
+            df.rename(columns={col0: "Timestamp"}, inplace=True)
+            print(f"  - Converted timestamps for {name}")
+
+        # Drop duplicates
+        initial_len = len(df)
+        df.drop_duplicates(inplace=True)
+        if len(df) < initial_len:
+            print(f"  - Dropped {initial_len - len(df)} duplicate rows")
+
+        # Handle missing values (simple forward fill for time series or drop)
+        if df.isnull().sum().sum() > 0:
+            print(f"  - Filling missing values (ffill)")
+            df.fillna(method='ffill', inplace=True)
+            df.fillna(method='bfill', inplace=True) # for trailing/leading
+
+        # Save processed file
+        save_path = os.path.join(output_dir, f"processed_{name}.csv")
+        df.to_csv(save_path, index=False)
+        print(f"  - Saved processed data to {save_path}")
+        
+        return df
+    except Exception as e:
+        print(f"Error processing {name}: {e}")
+        return None
+
+# Process all files
+dfs = {}
+for name, path in files.items():
+    dfs[name] = clean_and_save(name, path)
+
+# Basic Visualization
+print("Generating baseline plots...")
+for name, df in dfs.items():
+    if df is not None:
+        try:
+            plt.figure(figsize=(10, 6))
+            
+            # Identify numeric columns
+            numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+            
+            if len(numeric_cols) >= 1:
+                # Plot first numeric column histogram
+                col = numeric_cols[0]
+                df[col].hist(bins=20)
+                plt.title(f"Distribution of {col} in {name}")
+                plt.xlabel(col)
+                plt.ylabel("Frequency")
+                plt.savefig(os.path.join(plots_dir, f"hist_{name}_{col}.png"))
+                plt.close()
+                
+            if len(numeric_cols) >= 2:
+                # Scatter plot of first two numeric columns
+                col1, col2 = numeric_cols[0], numeric_cols[1]
+                plt.figure(figsize=(10, 6))
+                plt.scatter(df[col1], df[col2], alpha=0.5)
+                plt.title(f"{col1} vs {col2} in {name}")
+                plt.xlabel(col1)
+                plt.ylabel(col2)
+                plt.savefig(os.path.join(plots_dir, f"scatter_{name}_{col1}_{col2}.png"))
+                plt.close()
+                
+        except Exception as e:
+            print(f"Error plotting {name}: {e}")
+
+print("Processing and initial visualization complete.")
